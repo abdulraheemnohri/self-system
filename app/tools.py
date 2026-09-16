@@ -1,6 +1,7 @@
 """
 Tool Registry for Complete Self System
-ٹولز رجسٹری برائے خود کار نظام
+
+Centralized tool management and execution system
 """
 
 import json
@@ -66,7 +67,13 @@ class ToolRegistry:
         if not expression:
             return "No expression"
         try:
-            result = eval(expression, {'__builtins__': None}, {'sin': math.sin, 'cos': math.cos, 'tan': math.tan, 'sqrt': math.sqrt, 'log': math.log, 'log10': math.log10, 'exp': math.exp, 'pi': math.pi, 'e': math.e, 'pow': math.pow, 'abs': abs, 'round': round, 'min': min, 'max': max, 'sum': sum})
+            result = eval(expression, {'__builtins__': None}, {
+                'sin': math.sin, 'cos': math.cos, 'tan': math.tan,
+                'sqrt': math.sqrt, 'log': math.log, 'log10': math.log10,
+                'exp': math.exp, 'pi': math.pi, 'e': math.e,
+                'pow': math.pow, 'abs': abs, 'round': round,
+                'min': min, 'max': max, 'sum': sum
+            })
             return str(result)
         except Exception as e:
             return f"Error: {str(e)}"
@@ -137,7 +144,7 @@ class ToolRegistry:
         if not path or not content:
             return "Path and content required"
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return f"File written: {path}"
