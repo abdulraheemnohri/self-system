@@ -1,9 +1,40 @@
-# Environment variables
+# Complete Self System Git Ignore
+# ====================================
+# https://github.com/abdulraheemnohri/self-system
+
+# Environment and Configuration
+# -----------------------------
 .env
 .env.local
 .env.*.local
 
+# API Keys and Secrets
+# --------------------
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+api_key.txt
+secrets.json
+credentials.json
+
+# IDE and Editor
+# ---------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
 # Python
+# ------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -25,43 +56,208 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual Environments
+# --------------------
 venv/
 ENV/
 env/
 .venv/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
 # Testing
+# -------
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .nox/
 
-# Storage
-storage/
+# Logs
+# -----
+*.log
+logs/
+storage/*.log
+
+# Database Files
+# --------------
 *.db
+*.sqlite
+*.sqlite3
+storage/*.db
+storage/*.sqlite
+storage/*.sqlite3
 *.db-shm
 *.db-wal
 
-# Logs
-*.log
-logs/
+# Vector Storage
+# --------------
+storage/vector/*
+*.index
+*.faiss
 
-# OS
+# ChromaDB
+# ---------
+chroma-data/
+
+# Qdrant
+# ------
+qdrant-data/
+
+# PostgreSQL
+# ----------
+*.psql
+*.sql
+
+# Docker
+# ------
+docker-compose.override.yml
+docker-compose.*.yml
+
+# OS Generated Files
+# -----------------
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Temporary Files
+# ---------------
+*.tmp
+*.temp
+.cache/
+.temp/
+
+# Local Storage (keep directory structure)
+# ---------------------------------------
+storage/
+!storage/.gitkeep
+
+# Plugins (keep directory and sample)
+# -----------------------------------
+plugins/
+!plugins/.gitkeep
+!plugins/sample_tool.py
+
+# Generated Skills
+# ----------------
+generated_skills/
+!generated_skills/.gitkeep
+
+# Tests
+# -----
+tests/
+!tests/.gitkeep
+
+# Node.js (for future dashboard)
+# ------------------------------
 node_modules/
 package-lock.json
+npm-debug.log*
+yarn-error.log*
 
-# Browser
+# Build Output
+# -------------
+build/
+dist/
+output/
+
+# Coverage Reports
+# ----------------
+.coverage
+coverage.xml
+
+# Python Cache
+# ------------
+.pytest_cache/
+__pycache__/
+
+# Local History
+# -------------
+.history/
+
+# Backup Files
+# ------------
+*.bak
+*.backup
+*~
+
+# IDE Specific
+# ------------
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Mac OS
+# ------
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+# -------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+# -----
+*~
+.nfs*
+
+# Compiled Python
+# ---------------
+*.pyc
+__pycache__/
+
+# Distribution
+# ------------
+.Python
+env/
+venv/
+ENV/
+
+# Installer logs
+# --------------
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+# -----------------------------
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+# ------------
+*.mo
+*.pot
+
+# Data Files
+# ----------
+*.csv
+*.json
+*.xml
+*.yaml
+*.yml
+
+# Playwright
+# ----------
 playwright/
+
+# Local Development
+# ------------------
+*.local
+*.dev
+*.test
+
+# Note: To include specific files in the above directories,
+# add them explicitly with ! prefix
+# Example: !storage/.gitkeep keeps an empty file in storage/
