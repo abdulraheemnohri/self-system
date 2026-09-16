@@ -1,169 +1,446 @@
+#!/usr/bin/env python3
 """
-Agent Core for Complete Self System
+Agent Module for Complete Self System
 
-Implements the agent loop: perceive, retrieve, plan, act, observe, learn
+Provides:
+- Agent loop (Plan, Execute, Observe, Learn)
+- Context building with memory and facts
+- Tool calling integration
+- Direct reply without tools
 """
 
 import json
 import time
-from typing import List, Dict, Any, Optional, Tuple
-from .config import config
-from .llm import llm_client, simple_llm_reply
-from .db import db
-from .vector_store import vector_store
-from .tools import tools
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 
 
 class Agent:
-    def __init__(self):
-        self.max_steps = config.get('agent.max_agent_steps', 10)
-        self.context_turns = config.get('agent.context_turns', 16)
-        self.enable_tool_calls = config.get('agent.enable_tool_calls', True)
-        self.history: List[Dict[str, Any]] = []
+    """
+    Agent that can call tools and use memory to accomplish tasks.
     
-    def reset_context(self) -> None:
+    Features:
+    - Multi-step tool calling
+    - Memory retrieval
+    - Context building
+    - Conversation history
+    """
+    
+    def __init__(self, db=None, cfg=None, embedder=None, tools=None):
+        """
+        Initialize the Agent.
+        
+        Args:
+            db: Database instance
+            cfg: Configuration dictionary
+            embedder: Embedder instance
+            tools: ToolRegistry instance
+        """
+        self.db = db
+        self.cfg = cfg or {}
+        self.embedder = embedder
+        self.tools = tools
         self.history = []
     
-    def add_to_history(self, role: str, content: str, metadata: Optional[Dict] = None) -> None:
-        self.history.append({'role': role, 'content': content, 'metadata': metadata or {}, 'timestamp': time.time()})
-        if len(self.history) > self.context_turns * 2:
-            self.history = self.history[-self.context_turns * 2:]
-        db.add_history(role, content)
-    
-    def get_context(self) -> List[Dict[str, Any]]:
-        return [{'role': msg['role'], 'content': msg['content']} for msg in self.history]
-    
-    def _retrieve_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        vector_results = vector_store.search(query, limit)
-        fact_results = db.get_facts(limit)
-        knowledge_results = db.search_knowledge(query, limit)
-        all_results = []
-        seen_texts = set()
-        for result in vector_results + fact_results + knowledge_results:
-            text = result.get('text', '') or result.get('content', '') or f"{result.get('key')}: {result.get('value')}"
-            if text and text not in seen_texts:
-                seen_texts.add(text)
-                all_results.append(result)
-        return all_results[:limit]
-    
-    def _format_memory(self, memories: List[Dict[str, Any]]) -> str:
-        if not memories:
+    def build_context(self, query: str = "") -> str:
+        """
+        Build the context for LLM with memory and facts.
+        
+        Args:
+            query: User query
+            
+        Returns:
+            Context string
+        """
+        if not self.db or not self.embedder:
             return ""
-        parts = []
-        for i, mem in enumerate(memories, 1):
-            text = mem.get('text', '') or mem.get('content', '') or f"{mem.get('key')}: {mem.get('value')}"
-            score = mem.get('score', 0)
-            kind = mem.get('kind', mem.get('category', 'note'))
-            parts.append(f"Memory {i} [{kind}] (relevance: {score*100:.0f}%): {text[:500]}")
-        return "\n".join(parts)
+        
+        # Get facts
+        facts = self.db.get_facts()
+        fact_lines = "\n".join(f"- {k}: {v}" for k, v in facts.items()) or "None"
+        
+        # Search vector memory
+        from app.vector_store import search_vector_memory
+        memories = search_vector_memory(self.db, self.embedder, query, limit=5)
+        memory_lines = "\n".join(
+            f"- [{item['kind']} score={item['score']:.2f}] {item['text'][:200]}"
+            for item in memories
+        ) or "None"
+        
+        system_prompt = self.cfg.get('prompt.system', 
+            "You are a complete self-growing AI assistant. "
+            "Use tools when needed to accomplish tasks. "
+            "Search memory for relevant information. "
+            "Use memory only when relevant. "
+            "Be concise, practical, and safe. "
+            "If you do not know something, say so."
+        )
+        
+        return f"""{system_prompt}
+
+Current time: {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+Stored user facts:
+{fact_lines}
+
+Relevant vector memory:
+{memory_lines}
+
+Use tools only when needed.
+If a tool result is useful, continue.
+When the task is complete, return a final natural-language answer.
+"""
     
-    def _plan(self, query: str, memories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        context = self.get_context()
-        memory_text = self._format_memory(memories)
-        prompt = f"Plan how to answer: {query}\n\nMemories:\n{memory_text}"
-        messages = [{'role': 'system', 'content': 'You are a helpful AI planning assistant.'}, {'role': 'user', 'content': prompt}]
-        response = simple_llm_reply(messages, max_tokens=2000, temperature=0.3)
-        try:
-            data = json.loads(response)
-            return data.get('steps', [])
-        except:
-            return [{'action': 'respond', 'content': response}]
+    def run(self, user_input: str) -> str:
+        """
+        Run the agent loop with tool calling.
+        
+        Args:
+            user_input: User input
+            
+        Returns:
+            Agent response
+        """
+        if not self.db or not self.cfg or not self.embedder or not self.tools:
+            return "Agent components not initialized."
+        
+        history = self.db.get_history(int(self.cfg.get("agent.context_turns", 12)))
+        
+        messages = [
+            {
+                "role": "system",
+                "content": self.build_context(user_input)
+            }
+        ]
+        
+        for row in history:
+            messages.append({
+                "role": row.get("role", "user"),
+                "content": row.get("content", "")
+            })
+        
+        messages.append({
+            "role": "user",
+            "content": user_input
+        })
+        
+        max_steps = int(self.cfg.get("agent.max_agent_steps", 8))
+        
+        for step in range(max_steps):
+            use_tools = self.cfg.get("agent.enable_tool_calls", True)
+            tool_schemas = self.tools.schemas() if use_tools else None
+            
+            # Import here to avoid circular imports
+            from app.llm import call_chat_api_raw
+            message = call_chat_api_raw(self.cfg, messages, tools=tool_schemas)
+            
+            # Some providers reject tools. Retry without tools.
+            if "_error" in message and use_tools:
+                message = call_chat_api_raw(self.cfg, messages, tools=None)
+            
+            if "_error" in message:
+                return message["_error"]
+            
+            # Check for tool calls
+            tool_calls = message.get("tool_calls")
+            
+            if tool_calls:
+                # Add assistant message with tool calls
+                assistant_message = {
+                    "role": "assistant",
+                    "content": message.get("content") or "",
+                    "tool_calls": tool_calls
+                }
+                messages.append(assistant_message)
+                
+                # Execute each tool call
+                for call in tool_calls:
+                    function_info = call.get("function", {})
+                    tool_name = function_info.get("name", "")
+                    arguments_text = function_info.get("arguments", "{}")
+                    
+                    try:
+                        arguments = json.loads(arguments_text)
+                    except Exception:
+                        arguments = {}
+                    
+                    # Execute the tool
+                    result = self.tools.execute(tool_name, arguments)
+                    
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call.get("id", ""),
+                        "name": tool_name,
+                        "content": str(result)[:4000]
+                    })
+                
+                # Continue to next step
+                continue
+            
+            # No tool calls, return the content
+            content = message.get("content", "") or ""
+            return content
+        
+        return "Agent stopped: max steps reached"
     
-    def _execute_step(self, step: Dict[str, Any]) -> Tuple[str, bool]:
-        action = step.get('action', '')
-        if action == 'tool':
-            tool_name = step.get('tool', '')
-            args = step.get('args', {})
-            tool = tools.get_tool(tool_name)
-            if not tool:
-                return f"Tool {tool_name} not found.", False
-            if tool.get('requires_approval', False):
-                return f"Tool {tool_name} requires approval.", False
-            try:
-                result = tools.execute_tool(tool_name, args)
-                return f"Tool {tool_name}: {result}", False
-            except Exception as e:
-                return f"Tool {tool_name} failed: {str(e)}", False
-        elif action == 'respond':
-            return step.get('content', ''), True
-        return f"Unknown action: {action}", False
-    
-    def run(self, query: str) -> str:
-        self.add_to_history('user', query)
-        memories = self._retrieve_memory(query, limit=5)
-        plan = self._plan(query, memories)
-        results = []
-        for step in plan[:self.max_steps]:
-            result, is_final = self._execute_step(step)
-            results.append(result)
-            if is_final:
-                break
-        response = "\n\n".join(results)
-        self.add_to_history('assistant', response)
-        vector_store.add(f"Q: {query}\nA: {response}", kind='conversation')
-        return response
-    
-    def direct_reply(self, query: str) -> str:
-        memories = self._retrieve_memory(query, limit=5)
-        memory_text = self._format_memory(memories)
-        context = self.get_context()
-        context_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in context[-4:]])
-        prompt = f"Answer: {query}\n\nContext:\n{context_text}\n\nMemories:\n{memory_text}"
-        messages = [{'role': 'system', 'content': 'You are a helpful AI assistant.'}, {'role': 'user', 'content': prompt}]
-        response = simple_llm_reply(messages, max_tokens=4096, temperature=0.7)
-        self.add_to_history('user', query)
-        self.add_to_history('assistant', response)
-        vector_store.add(f"Q: {query}\nA: {response}", kind='conversation')
-        return response
-    
-    def handle_command(self, command: str) -> str:
-        command = command.strip().lower()
-        if command in ('/help', 'help'):
-            return self._help()
-        elif command.startswith('/remember '):
-            parts = command.split(' ', 2)
-            if len(parts) >= 3:
-                key, value = parts[1], parts[2]
-                db.add_fact(key, value)
-                vector_store.add(f"{key}: {value}", kind='fact', metadata={'key': key})
-                return f"Remembered: {key} = {value}"
-            return "Usage: /remember <key> <value>"
-        elif command.startswith('/note '):
-            text = command[6:].strip()
-            if text:
-                db.add_note(text)
-                vector_store.add(text, kind='note')
-                return f"Note saved: {text[:100]}"
-            return "Usage: /note <text>"
-        elif command in ('/facts', 'facts'):
-            facts = db.get_facts(20)
-            return "\n".join([f"{f['key']} = {f['value']}" for f in facts]) if facts else "No facts."
-        elif command in ('/notes', 'notes'):
-            notes = db.list_notes(20)
-            return "\n".join([f"- {n['text'][:200]}" for n in notes]) if notes else "No notes."
-        elif command in ('/memory', 'memory'):
-            return str(vector_store.get_stats())
-        elif command in ('/tools', 'tools'):
-            return "Tools:\n" + "\n".join([f"- {t['name']}: {t['description']}" for t in tools.list_tools()])
-        elif command in ('/clear', 'clear'):
-            self.reset_context()
-            return "Context cleared."
-        elif command in ('/stats', 'stats'):
-            return str(db.get_stats())
-        return f"Unknown command: {command}"
-    
-    def _help(self) -> str:
-        return "Complete Self System Commands:\n/remember <k> <v> - Remember fact\n/note <t> - Save note\n/facts - List facts\n/notes - List notes\n/tools - List tools\n/clear - Clear context\n/stats - Stats\n/help - Help\n/exit - Exit"
+    def direct_reply(self, user_input: str) -> str:
+        """
+        Get a direct LLM reply without agent tools.
+        
+        Args:
+            user_input: User input
+            
+        Returns:
+            LLM response
+        """
+        if not self.db or not self.cfg or not self.embedder:
+            return "Agent components not initialized."
+        
+        history = self.db.get_history(int(self.cfg.get("agent.context_turns", 12)))
+        
+        messages = [
+            {
+                "role": "system",
+                "content": self.build_context(user_input)
+            }
+        ]
+        
+        for row in history:
+            messages.append({
+                "role": row.get("role", "user"),
+                "content": row.get("content", "")
+            })
+        
+        messages.append({
+            "role": "user",
+            "content": user_input
+        })
+        
+        # Import here to avoid circular imports
+        from app.llm import call_chat_api_raw
+        message = call_chat_api_raw(self.cfg, messages, tools=None)
+        
+        if "_error" in message:
+            return message["_error"]
+        
+        return message.get("content", "") or ""
 
 
-agent = Agent()
+# Standalone functions (for use without Agent class)
+def build_context(db, cfg: Dict[str, Any], embedder, query: str = "") -> str:
+    """
+    Build context for LLM with memory and facts (standalone function).
+    
+    Args:
+        db: Database instance
+        cfg: Configuration dictionary
+        embedder: Embedder instance
+        query: User query
+        
+    Returns:
+        Context string
+    """
+    if not db or not embedder:
+        return ""
+    
+    # Get facts
+    facts = db.get_facts()
+    fact_lines = "\n".join(f"- {k}: {v}" for k, v in facts.items()) or "None"
+    
+    # Search vector memory
+    from app.vector_store import search_vector_memory
+    memories = search_vector_memory(db, embedder, query, limit=5)
+    memory_lines = "\n".join(
+        f"- [{item['kind']} score={item['score']:.2f}] {item['text'][:200]}"
+        for item in memories
+    ) or "None"
+    
+    system_prompt = cfg.get('prompt.system', 
+        "You are a complete self-growing AI assistant. "
+        "Use tools when needed to accomplish tasks. "
+        "Search memory for relevant information. "
+        "Use memory only when relevant. "
+        "Be concise, practical, and safe. "
+        "If you do not know something, say so."
+    )
+    
+    return f"""{system_prompt}
 
-def run_agent(query: str) -> str:
-    use_agent_mode = config.get('agent.agent_mode', True)
-    enable_tool_calls = config.get('agent.enable_tool_calls', True)
-    if use_agent_mode and enable_tool_calls:
-        return agent.run(query)
-    return agent.direct_reply(query)
+Current time: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
-def direct_reply(query: str) -> str:
-    return agent.direct_reply(query)
+Stored user facts:
+{fact_lines}
+
+Relevant vector memory:
+{memory_lines}
+
+Use tools only when needed.
+If a tool result is useful, continue.
+When the task is complete, return a final natural-language answer.
+"""
+
+
+def run_agent(user_input: str, ctx: Dict[str, Any]) -> str:
+    """
+    Run the agent loop with tool calling (standalone function).
+    
+    Args:
+        user_input: User input
+        ctx: Context dictionary with db, cfg, embedder, tools
+        
+    Returns:
+        Agent response
+    """
+    db = ctx.get("db")
+    cfg = ctx.get("cfg", {})
+    embedder = ctx.get("embedder")
+    tools = ctx.get("tools")
+    
+    history = db.get_history(int(cfg.get("agent.context_turns", 12))) if db else []
+    
+    messages = [
+        {
+            "role": "system",
+            "content": build_context(db, cfg, embedder, user_input)
+        }
+    ]
+    
+    for row in history:
+        messages.append({
+            "role": row.get("role", "user"),
+            "content": row.get("content", "")
+        })
+    
+    messages.append({
+        "role": "user",
+        "content": user_input
+    })
+    
+    from app.llm import call_chat_api_raw
+    max_steps = int(cfg.get("agent.max_agent_steps", 8))
+    
+    for step in range(max_steps):
+        use_tools = cfg.get("agent.enable_tool_calls", True)
+        tool_schemas = tools.schemas() if use_tools and tools else None
+        
+        message = call_chat_api_raw(cfg, messages, tools=tool_schemas)
+        
+        # Some providers reject tools. Retry without tools.
+        if "_error" in message and use_tools:
+            message = call_chat_api_raw(cfg, messages, tools=None)
+        
+        if "_error" in message:
+            return message["_error"]
+        
+        # Check for tool calls
+        tool_calls = message.get("tool_calls")
+        
+        if tool_calls:
+            # Add assistant message with tool calls
+            assistant_message = {
+                "role": "assistant",
+                "content": message.get("content") or "",
+                "tool_calls": tool_calls
+            }
+            messages.append(assistant_message)
+            
+            # Execute each tool call
+            for call in tool_calls:
+                function_info = call.get("function", {})
+                tool_name = function_info.get("name", "")
+                arguments_text = function_info.get("arguments", "{}")
+                
+                try:
+                    arguments = json.loads(arguments_text)
+                except Exception:
+                    arguments = {}
+                
+                # Execute the tool
+                result = tools.execute(tool_name, arguments)
+                
+                # Add tool result to messages
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id", ""),
+                    "name": tool_name,
+                    "content": str(result)[:4000]
+                })
+            
+            # Continue to next step
+            continue
+        
+        # No tool calls, return the content
+        content = message.get("content", "") or ""
+        return content
+    
+    return "Agent stopped: max steps reached"
+
+
+def direct_reply(user_input: str, ctx: Dict[str, Any]) -> str:
+    """
+    Get a direct LLM reply without agent tools (standalone function).
+    
+    Args:
+        user_input: User input
+        ctx: Context dictionary
+        
+    Returns:
+        LLM response
+    """
+    db = ctx.get("db")
+    cfg = ctx.get("cfg", {})
+    embedder = ctx.get("embedder")
+    
+    history = db.get_history(int(cfg.get("agent.context_turns", 12))) if db else []
+    
+    messages = [
+        {
+            "role": "system",
+            "content": build_context(db, cfg, embedder, user_input)
+        }
+    ]
+    
+    for row in history:
+        messages.append({
+            "role": row.get("role", "user"),
+            "content": row.get("content", "")
+        })
+    
+    messages.append({
+        "role": "user",
+        "content": user_input
+    })
+    
+    from app.llm import call_chat_api_raw
+    message = call_chat_api_raw(cfg, messages, tools=None)
+    
+    if "_error" in message:
+        return message["_error"]
+    
+    return message.get("content", "") or ""
+
+
+def parse_json_action(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse a JSON action from text (fallback for providers without tool calling).
+    
+    Args:
+        text: Text to parse
+        
+    Returns:
+        Action dictionary or None
+    """
+    try:
+        import re
+        match = re.search(r"\{.*\}", str(text), re.DOTALL)
+        if not match:
+            return None
+        
+        data = json.loads(match.group(0))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    
+    return None
