@@ -1,50 +1,54 @@
+#!/usr/bin/env python3
 """
-Sample Tool Plugin for Complete Self System
+Sample Plugin for Complete Self System
 
-Demonstrates plugin architecture with text manipulation tools
+This is a sample plugin that demonstrates the plugin interface.
+All plugins must define an `execute(args)` function.
+
+Usage:
+    /run sample_tool hello world
+    
+Result:
+    Sample plugin received: hello world
+    
+Additional functions:
+    /run sample_tool {"action": "reverse", "text": "hello"} -> "olleh"
+    /run sample_tool {"action": "uppercase", "text": "hello"} -> "HELLO"
+    /run sample_tool {"action": "lowercase", "text": "HELLO"} -> "hello"
 """
 
-import json
-from typing import Dict, Any
 
-
-def reverse_text(args: Dict[str, Any]) -> str:
-    text = args.get('text', '')
-    return text[::-1]
-
-
-def uppercase_text(args: Dict[str, Any]) -> str:
-    text = args.get('text', '')
-    return text.upper()
-
-
-def lowercase_text(args: Dict[str, Any]) -> str:
-    text = args.get('text', '')
-    return text.lower()
-
-
-def count_words(args: Dict[str, Any]) -> str:
-    text = args.get('text', '')
-    return str(len(text.split()))
-
-
-def count_chars(args: Dict[str, Any]) -> str:
-    text = args.get('text', '')
-    return str(len(text))
-
-
-PLUGIN_NAME = "sample_tool"
-PLUGIN_VERSION = "1.0.0"
-PLUGIN_DESCRIPTION = "Sample text manipulation tools"
-
-AVAILABLE_FUNCTIONS = {
-    'reverse_text': {'description': 'Reverse the input text', 'parameters': {'text': {'type': 'string', 'required': True, 'description': 'Text to reverse'}}, 'handler': reverse_text},
-    'uppercase_text': {'description': 'Convert text to uppercase', 'parameters': {'text': {'type': 'string', 'required': True, 'description': 'Text to convert'}}, 'handler': uppercase_text},
-    'lowercase_text': {'description': 'Convert text to lowercase', 'parameters': {'text': {'type': 'string', 'required': True, 'description': 'Text to convert'}}, 'handler': lowercase_text},
-    'count_words': {'description': 'Count words in text', 'parameters': {'text': {'type': 'string', 'required': True, 'description': 'Text to count'}}, 'handler': count_words},
-    'count_chars': {'description': 'Count characters in text', 'parameters': {'text': {'type': 'string', 'required': True, 'description': 'Text to count'}}, 'handler': count_chars}
-}
-
-
-def get_plugin_info() -> Dict[str, Any]:
-    return {'name': PLUGIN_NAME, 'version': PLUGIN_VERSION, 'description': PLUGIN_DESCRIPTION, 'functions': AVAILABLE_FUNCTIONS}
+def execute(args):
+    """
+    Execute the plugin with given arguments.
+    
+    Args:
+        args: Plugin arguments (can be string, dict, or any type)
+        
+    Returns:
+        Result of the plugin execution
+    """
+    # If args is a string, just return it with prefix
+    if isinstance(args, str):
+        return f"Sample plugin received: {args}"
+    
+    # If args is a dict, handle different actions
+    if isinstance(args, dict):
+        action = args.get("action", "echo")
+        text = args.get("text", "")
+        
+        if action == "reverse":
+            return text[::-1]
+        elif action == "uppercase":
+            return text.upper()
+        elif action == "lowercase":
+            return text.lower()
+        elif action == "count_words":
+            return str(len(text.split()))
+        elif action == "count_chars":
+            return str(len(text))
+        else:
+            return f"Sample plugin received: {args}"
+    
+    # For any other type, convert to string
+    return f"Sample plugin received: {args}"
