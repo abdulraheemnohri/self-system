@@ -1,115 +1,161 @@
 """
 Tool Registry for Complete Self System
-ٹولز رجسٹری
+ٹولز رجسٹری برائے خود کار نظام
 """
 
 import json
 import math
-import operator
-import ast
-import hashlib
-import re
-from typing import Dict, Any, List, Callable, Optional
-from .db import Database
-from .vector_store import VectorStore
-
-
-SAFE_FUNCS = {"abs": abs, "round": round, "min": min, "max": max, "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan, "log": math.log, "exp": math.exp, "floor": math.floor, "ceil": math.ceil}
-
-SAFE_BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow}
-
-SAFE_UNARYOPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
-
-
-def safe_math(expression):
-    expression = str(expression or "").strip().replace("^", "**")
-    if not expression:
-        raise ValueError("Empty expression")
-    tree = ast.parse(expression, mode="eval")
-    def _eval(node):
-        if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
-                return node.value
-            raise ValueError("Only numeric constants allowed")
-        if isinstance(node, ast.BinOp):
-            op_type = type(node.op)
-            if op_type not in SAFE_BINOPS:
-                raise ValueError("Unsupported binary operator")
-            return SAFE_BINOPS[op_type](_eval(node.left), _eval(node.right))
-        if isinstance(node, ast.UnaryOp):
-            op_type = type(node.op)
-            if op_type not in SAFE_UNARYOPS:
-                raise ValueError("Unsupported unary operator")
-            return SAFE_UNARYOPS[op_type](_eval(node.operand))
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name):
-                raise ValueError("Only direct function calls allowed")
-            name = node.func.id
-            if name not in SAFE_FUNCS:
-                raise ValueError(f"Function not allowed: {name}")
-            if node.keywords:
-                raise ValueError("Keyword arguments not allowed")
-            args = [_eval(arg) for arg in node.args]
-            return SAFE_FUNCS[name](*args)
-        if isinstance(node, ast.Name):
-            if node.id in SAFE_FUNCS:
-                return SAFE_FUNCS[node.id]
-            raise ValueError(f"Unknown name: {node.id}")
-        raise ValueError("Unsupported expression element")
-    return _eval(tree.body)
+import time
+import datetime
+import subprocess
+import os
+from typing import Dict, Any, List, Optional, Callable
+from .db import db
+from .llm import llm_client
+from .vector_store import vector_store
+from .config import config
 
 
 class ToolRegistry:
-    """Registry for all available tools"""
-    
     def __init__(self):
-        self.tools = {}
+        self.tools: Dict[str, Dict[str, Any]] = {}
+        self._register_builtin_tools()
     
-    def register(self, name, description, parameters, handler):
-        self.tools[name] = {"handler": handler, "schema": {"type": "function", "function": {"name": name, "description": description, "parameters": parameters}}}
+    def _register_builtin_tools(self):
+        self.register_tool('get_current_time', 'Get current time', self._get_current_time, {'timezone': {'type': 'string', 'default': 'UTC'}})
+        self.register_tool('calculate', 'Perform calculations', self._calculate, {'expression': {'type': 'string', 'required': True}})
+        self.register_tool('search_memory', 'Search memory', self._search_memory, {'query': {'type': 'string', 'required': True}, 'limit': {'type': 'integer', 'default': 5}})
+        self.register_tool('save_note', 'Save a note', self._save_note, {'text': {'type': 'string', 'required': True}, 'tags': {'type': 'string', 'default': ''}})
+        self.register_tool('remember_fact', 'Remember a fact', self._remember_fact, {'key': {'type': 'string', 'required': True}, 'value': {'type': 'string', 'required': True}})
+        self.register_tool('get_fact', 'Get a fact', self._get_fact, {'key': {'type': 'string', 'required': True}})
+        self.register_tool('fetch_url', 'Fetch URL', self._fetch_url, {'url': {'type': 'string', 'required': True}})
+        self.register_tool('read_file', 'Read file', self._read_file, {'path': {'type': 'string', 'required': True}})
+        self.register_tool('write_file', 'Write file', self._write_file, {'path': {'type': 'string', 'required': True}, 'content': {'type': 'string', 'required': True}}, requires_approval=True)
+        self.register_tool('shell', 'Execute shell', self._shell, {'command': {'type': 'string', 'required': True}}, requires_approval=True)
     
-    def schemas(self):
-        return [tool["schema"] for tool in self.tools.values()]
+    def register_tool(self, name: str, description: str, handler: Callable, parameters: Dict = None, requires_approval: bool = False):
+        self.tools[name] = {'name': name, 'description': description, 'handler': handler, 'parameters': parameters or {}, 'requires_approval': requires_approval}
     
-    def names(self):
-        return sorted(self.tools.keys())
+    def get_tool(self, name: str) -> Optional[Dict]:
+        return self.tools.get(name)
     
-    def exists(self, name):
-        return name in self.tools
+    def list_tools(self) -> List[Dict]:
+        return list(self.tools.values())
     
-    def execute(self, name, args=None):
-        if name not in self.tools:
-            return f"Unknown tool: {name}"
+    def execute_tool(self, name: str, args: Dict) -> Any:
+        tool = self.get_tool(name)
+        if not tool:
+            return f"Tool {name} not found"
+        if tool.get('requires_approval', False):
+            return f"Tool {name} requires approval"
+        return tool['handler'](args)
+    
+    def _get_current_time(self, args):
+        timezone = args.get('timezone', 'UTC')
+        if timezone.upper() == 'UTC':
+            return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         try:
-            return self.tools[name]["handler"](args or {})
-        except Exception as exc:
-            return f"Tool error: {exc}"
-
-
-class ToolFactory:
-    """Factory for creating standard tools"""
+            import pytz
+            tz = pytz.timezone(timezone)
+            return datetime.datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+        except:
+            return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    def __init__(self, db, vector_store):
-        self.db = db
-        self.vector = vector_store
-        self.registry = ToolRegistry()
-        self._register_standard_tools()
+    def _calculate(self, args):
+        expression = args.get('expression', '')
+        if not expression:
+            return "No expression"
+        try:
+            result = eval(expression, {'__builtins__': None}, {'sin': math.sin, 'cos': math.cos, 'tan': math.tan, 'sqrt': math.sqrt, 'log': math.log, 'log10': math.log10, 'exp': math.exp, 'pi': math.pi, 'e': math.e, 'pow': math.pow, 'abs': abs, 'round': round, 'min': min, 'max': max, 'sum': sum})
+            return str(result)
+        except Exception as e:
+            return f"Error: {str(e)}"
     
-    def _register_standard_tools(self):
-        self.registry.register("get_current_time", "Get current local time", {"type": "object", "properties": {}}, handler=lambda args: __import__("datetime").datetime.now().isoformat(timespec="seconds"))
-        self.registry.register("calculate", "Evaluate a math expression safely", {"type": "object", "properties": {"expression": {"type": "string"}}, "required": ["expression"]}, handler=lambda args: safe_math(args.get("expression", "")))
-        self.registry.register("search_memory", "Search long-term vector memory", {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}, handler=lambda args: json.dumps(self.vector.search_memory(args.get("query", ""), int(args.get("limit", 5))), indent=2, ensure_ascii=False))
-        self.registry.register("save_note", "Save a note into memory", {"type": "object", "properties": {"text": {"type": "string"}, "tags": {"type": "string"}}, "required": ["text"]}, handler=lambda args: (self.db.add_note(args.get("text", ""), args.get("tags", "")), self.vector.remember_note(args.get("text", ""), args.get("tags", "")), "Note saved.")[2])
-        self.registry.register("remember_fact", "Store a user fact", {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}, handler=lambda args: (self.db.set_fact(args.get("key", ""), args.get("value", "")), self.vector.remember_fact(args.get("key", ""), args.get("value", "")), f"Remembered fact: {args.get('key', "" )}")[2])
+    def _search_memory(self, args):
+        query = args.get('query', '')
+        limit = args.get('limit', 5)
+        if not query:
+            return "No query"
+        results = vector_store.search(query, limit)
+        if not results:
+            return "No results"
+        return "\n".join([f"{i+1}. [{r['score']*100:.0f}%] {r['text'][:200]}" for i, r in enumerate(results)])
     
-    def get_registry(self):
-        return self.registry
+    def _save_note(self, args):
+        text = args.get('text', '')
+        tags = args.get('tags', '')
+        if not text:
+            return "No text"
+        note_id = db.add_note(text, tags)
+        vector_store.add(text, kind='note', metadata={'tags': tags})
+        return f"Note saved: {note_id}"
+    
+    def _remember_fact(self, args):
+        key = args.get('key', '')
+        value = args.get('value', '')
+        if not key or not value:
+            return "Key and value required"
+        db.add_fact(key, value)
+        vector_store.add(f"{key}: {value}", kind='fact', metadata={'key': key})
+        return f"Fact saved: {key} = {value}"
+    
+    def _get_fact(self, args):
+        key = args.get('key', '')
+        fact = db.get_fact(key)
+        return f"{fact['key']} = {fact['value']}" if fact else f"Fact {key} not found"
+    
+    def _fetch_url(self, args):
+        url = args.get('url', '')
+        if not url:
+            return "No URL"
+        try:
+            import requests
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            return f"URL: {url}\n\n{response.text[:10000]}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def _read_file(self, args):
+        path = args.get('path', '')
+        if not path:
+            return "No path"
+        try:
+            if not os.path.exists(path):
+                return f"File not found: {path}"
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if len(content) > 10000:
+                content = content[:10000] + "\n\n... (truncated)"
+            return f"File: {path}\n\n{content}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def _write_file(self, args):
+        path = args.get('path', '')
+        content = args.get('content', '')
+        if not path or not content:
+            return "Path and content required"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return f"File written: {path}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def _shell(self, args):
+        command = args.get('command', '')
+        if not command:
+            return "No command"
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+            output = result.stdout or result.stderr
+            if len(output) > 5000:
+                output = output[:5000] + "\n\n... (truncated)"
+            return f"Exit code: {result.returncode}\n\n{output}"
+        except Exception as e:
+            return f"Error: {str(e)}"
 
 
-_tool_factory = None
-
-def get_tool_registry(db, vector_store):
-    global _tool_factory
-    if _tool_factory is None:
-        _tool_factory = ToolFactory(db, vector_store)
-    return _tool_factory.get_registry()
+tools = ToolRegistry()
