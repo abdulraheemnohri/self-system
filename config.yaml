@@ -1,0 +1,79 @@
+# Complete Self System Configuration
+system:
+  name: "Complete Self System"
+  version: "1.0.0"
+  mode: "development"
+
+provider:
+  base_url: "http://localhost:11434/v1"
+  api_key: ""
+  model: "llama3.1"
+  embedding_model: "nomic-embed-text"
+  use_api_embeddings: true
+
+agent:
+  agent_mode: true
+  enable_tool_calls: true
+  max_agent_steps: 10
+  context_turns: 16
+
+memory:
+  vector_backend: "sqlite"
+  chroma_path: "storage/vector/chroma"
+  qdrant_url: "http://localhost:6333"
+  qdrant_collection: "self_system"
+
+safety:
+  autonomous_mode: false
+  auto_install_skills: false
+  allow_plugin_tool: false
+  allow_skill_tool: false
+  require_approval:
+    - browser_fill
+    - browser_click
+    - run_plugin
+    - generate_skill
+    - install_skill
+    - file_write
+    - shell
+  disabled:
+    - shell
+
+voice:
+  enabled: false
+  stt_engine: "faster-whisper"
+  tts_engine: "piper"
+
+browser:
+  headless: true
+  timeout_ms: 30000
+
+scheduler:
+  enabled: true
+  tasks:
+    - name: "memory_cleanup"
+      action: "maintenance"
+      interval_seconds: 3600
+    - name: "self_review"
+      action: "self_review"
+      interval_seconds: 14400
+    - name: "periodic_learning"
+      action: "periodic_learning"
+      interval_seconds: 43200
+    - name: "skill_proposal"
+      action: "skill_proposal"
+      interval_seconds: 86400
+
+database:
+  path: "storage/self_system.db"
+  max_history_days: 30
+  max_memories: 10000
+
+logging:
+  level: "INFO"
+  file: "storage/self_system.log"
+
+network:
+  timeout: 120
+  max_retries: 3
+  retry_delay: 1
