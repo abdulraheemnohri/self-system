@@ -1,6 +1,7 @@
 """
 Sample Tool Plugin for Complete Self System
-نمونہ ٹول پلاگ ان برائے خود کار نظام
+
+Demonstrates plugin architecture with text manipulation tools
 """
 
 import json
