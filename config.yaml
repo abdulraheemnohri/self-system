@@ -1,33 +1,125 @@
 # Complete Self System Configuration
+# This file contains all settings for the AI agent
+
+# ============================================================
+# System Settings
+# ============================================================
 system:
   name: "Complete Self System"
   version: "1.0.0"
-  mode: "development"
-
+  mode: "development"  # development, production, debug
+  debug: false
+  
+# ============================================================
+# LLM Provider Settings
+# ============================================================
 provider:
+  # API provider type (openai, openrouter, groq, mistral, together, ollama, local)
+  type: "openai-compatible"
+  
+  # Base URL for API (change based on provider)
+  # OpenAI: https://api.openai.com/v1
+  # OpenRouter: https://openrouter.ai/api/v1
+  # Groq: https://api.groq.com/openai/v1
+  # Mistral: https://api.mistral.ai/v1
+  # Ollama: http://localhost:11434/v1
+  # Local: http://localhost:8000/v1
   base_url: "http://localhost:11434/v1"
-  api_key: ""
+  
+  # API key (can also be set via environment variable AI_API_KEY)
+  api_key: ""  # Set this or use environment variable
+  
+  # Primary model for chat
   model: "llama3.1"
+  
+  # Model for embeddings
   embedding_model: "nomic-embed-text"
+  
+  # Use API embeddings (true) or fallback (false)
   use_api_embeddings: true
+  
+  # Timeout for API calls (seconds)
+  timeout: 90
+  
+  # Maximum tokens for responses
+  max_tokens: 2000
+  
+  # Temperature (0.0 to 1.0)
+  temperature: 0.2
 
+# ============================================================
+# Agent Settings
+# ============================================================
 agent:
+  # Enable agent mode (LLM can call tools)
   agent_mode: true
+  
+  # Enable tool calling (OpenAI-compatible function calling)
   enable_tool_calls: true
-  max_agent_steps: 10
-  context_turns: 16
+  
+  # Maximum number of tool calls per agent loop
+  max_agent_steps: 8
+  
+  # Number of conversation turns to include in context
+  context_turns: 12
+  
+  # Maximum context characters
+  max_context_chars: 9000
 
+# ============================================================
+# Memory Settings
+# ============================================================
 memory:
+  # Vector backend: sqlite, chroma, faiss, qdrant
   vector_backend: "sqlite"
-  chroma_path: "storage/vector/chroma"
-  qdrant_url: "http://localhost:6333"
-  qdrant_collection: "self_system"
+  
+  # SQLite database path
+  db_path: "storage/self_system.db"
+  
+  # ChromaDB settings (if using chroma backend)
+  chroma:
+    path: "storage/vector/chroma"
+    collection_name: "self_system_memory"
+  
+  # FAISS settings (if using faiss backend)
+  faiss:
+    path: "storage/vector/faiss.index"
+    dimension: 768
+  
+  # Qdrant settings (if using qdrant backend)
+  qdrant:
+    url: "http://localhost:6333"
+    collection: "self_system"
+  
+  # Embedding dimension for fallback embeddings
+  embedding_dim_fallback: 256
+  
+  # Minimum similarity score for memory search
+  similarity_threshold: 0.08
+  
+  # Knowledge threshold (for direct knowledge answers)
+  knowledge_threshold: 0.82
 
+# ============================================================
+# Safety Settings
+# ============================================================
 safety:
+  # Enable autonomous mode (scheduled tasks run automatically)
   autonomous_mode: false
+  
+  # Auto-install generated skills (DANGEROUS - enable with caution)
   auto_install_skills: false
+  
+  # Allow plugin tool execution
   allow_plugin_tool: false
+  
+  # Allow skill generation tool
   allow_skill_tool: false
+  
+  # Enable voice output
+  speak_responses: false
+  
+  # Tools that require approval
   require_approval:
     - browser_fill
     - browser_click
@@ -36,44 +128,213 @@ safety:
     - install_skill
     - file_write
     - shell
+    - execute_code
+  
+  # Disabled tools (completely blocked)
   disabled:
     - shell
+    - execute_code
 
+# ============================================================
+# Voice Settings
+# ============================================================
 voice:
+  # Enable voice features
   enabled: false
-  stt_engine: "faster-whisper"
-  tts_engine: "piper"
+  
+  # Speech-to-Text engine (google, sphinx, wit, ibm)
+  stt_engine: "google"
+  
+  # Text-to-Speech engine (pyttsx3, espeak)
+  tts_engine: "pyttsx3"
+  
+  # Language for speech
+  language: "en-US"
+  
+  # Speech rate (words per minute)
+  rate: 150
+  
+  # Volume (0.0 to 1.0)
+  volume: 0.9
 
+# ============================================================
+# Browser Settings
+# ============================================================
 browser:
+  # Run browser in headless mode
   headless: true
+  
+  # Browser type (chromium, firefox, webkit)
+  type: "chromium"
+  
+  # Timeout for browser operations (milliseconds)
   timeout_ms: 30000
+  
+  # Default wait condition
+  wait_until: "domcontentloaded"
 
+# ============================================================
+# Scheduler Settings
+# ============================================================
 scheduler:
+  # Enable scheduled tasks
   enabled: true
-  tasks:
+  
+  # Database path for scheduler
+  db_path: "storage/scheduler.db"
+  
+  # Default tasks (can be overridden)
+  default_tasks:
     - name: "memory_cleanup"
-      action: "maintenance"
-      interval_seconds: 3600
+      action: "memory_cleanup"
+      interval_seconds: 3600  # 1 hour
+      description: "Clean up old history and duplicate memories"
+      
     - name: "self_review"
       action: "self_review"
-      interval_seconds: 14400
+      interval_seconds: 14400  # 4 hours
+      description: "Review recent conversations and suggest improvements"
+      
     - name: "periodic_learning"
       action: "periodic_learning"
-      interval_seconds: 43200
+      interval_seconds: 43200  # 12 hours
+      description: "Summarize recent notes into long-term memory"
+      
     - name: "skill_proposal"
       action: "skill_proposal"
-      interval_seconds: 86400
+      interval_seconds: 86400  # 24 hours
+      description: "Propose new skills based on recent usage"
+      
+    - name: "health_check"
+      action: "health_check"
+      interval_seconds: 21600  # 6 hours
+      description: "Check system health and dependencies"
 
-database:
-  path: "storage/self_system.db"
-  max_history_days: 30
-  max_memories: 10000
+# ============================================================
+# Storage Settings
+# ============================================================
+storage:
+  # Base directory for storage
+  path: "storage"
+  
+  # Database file
+  database: "self_system.db"
+  
+  # Vector storage directory
+  vector_dir: "vector"
+  
+  # Safety database
+  safety_db: "safety.db"
+  
+  # Scheduler database
+  scheduler_db: "scheduler.db"
+  
+  # Plugin directory
+  plugins_dir: "plugins"
+  
+  # Generated skills directory
+  skills_dir: "generated_skills"
+  
+  # Tests directory
+  tests_dir: "tests"
 
+# ============================================================
+# Plugin Settings
+# ============================================================
+plugins:
+  # Auto-reload plugins on change
+  auto_reload: true
+  
+  # Allow dynamic plugin loading
+  allow_dynamic: true
+
+# ============================================================
+# Logging Settings
+# ============================================================
 logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
   level: "INFO"
-  file: "storage/self_system.log"
+  
+  # Log file path
+  file: "logs/self_system.log"
+  
+  # Max log file size (bytes)
+  max_size: 10485760  # 10MB
+  
+  # Number of log files to keep
+  backup_count: 5
 
-network:
-  timeout: 120
-  max_retries: 3
-  retry_delay: 1
+# ============================================================
+# API Settings
+# ============================================================
+api:
+  # Enable REST API
+  enabled: false
+  
+  # API host
+  host: "0.0.0.0"
+  
+  # API port
+  port: 8000
+  
+  # API prefix
+  prefix: "/api/v1"
+  
+  # Enable CORS
+  cors: true
+  
+  # CORS origins
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+# ============================================================
+# Web Dashboard Settings
+# ============================================================
+dashboard:
+  # Enable web dashboard
+  enabled: false
+  
+  # Dashboard host
+  host: "0.0.0.0"
+  
+  # Dashboard port
+  port: 8080
+  
+  # Dashboard title
+  title: "Complete Self System"
+
+# ============================================================
+# System Prompt
+# ============================================================
+prompt:
+  # Main system prompt
+  system: |
+    You are a complete self-growing AI assistant.
+    
+    Capabilities:
+    - Use tools when needed to accomplish tasks
+    - Search memory for relevant information
+    - Use memory only when relevant
+    - Be concise, practical, and safe
+    - If you do not know something, say so
+    - Follow user instructions carefully
+    
+    Safety:
+    - Never execute dangerous code
+    - Never modify files without permission
+    - Never expose sensitive information
+    - Always ask for clarification if unsure
+    
+    Memory:
+    - Store important information in notes
+    - Remember facts about the user
+    - Learn from conversations
+    
+    Tools:
+    - Use tools to accomplish tasks
+    - Only use tools when necessary
+    - Report tool results to the user
+    
+  # Conversation starter (for new chats)
+  starter: "How can I help you today?"
