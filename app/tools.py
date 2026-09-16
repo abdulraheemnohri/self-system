@@ -1,168 +1,425 @@
+#!/usr/bin/env python3
 """
 Tool Registry for Complete Self System
 
-Centralized tool management and execution system
+Provides:
+- Tool registration and management
+- OpenAI-compatible tool schemas
+- Tool execution with safety checks
+- Built-in tools (time, math, memory, etc.)
 """
 
 import json
 import math
 import time
 import datetime
-import subprocess
-import os
+import ast
+import operator
 from typing import Dict, Any, List, Optional, Callable
-from .db import db
-from .llm import llm_client
-from .vector_store import vector_store
-from .config import config
+
+
+# Safe math functions
+SAFE_FUNCS = {
+    "abs": abs,
+    "round": round,
+    "min": min,
+    "max": max,
+    "sqrt": math.sqrt,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "log": math.log,
+    "log10": math.log10,
+    "exp": math.exp,
+    "pow": math.pow,
+    "pi": math.pi,
+    "e": math.e,
+}
+
+SAFE_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+SAFE_UNARYOPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+def safe_math(expression: str) -> float:
+    """
+    Evaluate a math expression safely.
+    
+    Args:
+        expression: Math expression string
+        
+    Returns:
+        Result of the expression
+        
+    Raises:
+        ValueError: If expression is invalid or unsafe
+    """
+    expression = str(expression or "").strip().replace("^", "**")
+    
+    if not expression:
+        raise ValueError("Empty expression")
+    
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"Invalid expression: {exc}") from exc
+    
+    def _eval(node):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError("Only numeric constants are allowed")
+        
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in SAFE_BINOPS:
+                raise ValueError("Unsupported binary operator")
+            return SAFE_BINOPS[op_type](_eval(node.left), _eval(node.right))
+        
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in SAFE_UNARYOPS:
+                raise ValueError("Unsupported unary operator")
+            return SAFE_UNARYOPS[op_type](_eval(node.operand))
+        
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise ValueError("Only direct function calls are allowed")
+            func_name = node.func.id
+            if func_name not in SAFE_FUNCS:
+                raise ValueError(f"Function not allowed: {func_name}")
+            if node.keywords:
+                raise ValueError("Keyword arguments are not allowed")
+            args = [_eval(arg) for arg in node.args]
+            return SAFE_FUNCS[func_name](*args)
+        
+        if isinstance(node, ast.Name):
+            if node.id in SAFE_FUNCS:
+                return SAFE_FUNCS[node.id]
+            raise ValueError(f"Unknown name: {node.id}")
+        
+        raise ValueError("Unsupported expression element")
+    
+    return _eval(tree.body)
 
 
 class ToolRegistry:
+    """
+    Registry for managing tools that can be called by the LLM.
+    
+    Features:
+    - Register tools with schemas
+    - List available tools
+    - Execute tools by name
+    - Generate OpenAI-compatible tool schemas
+    """
+    
     def __init__(self):
+        """Initialize the ToolRegistry."""
         self.tools: Dict[str, Dict[str, Any]] = {}
-        self._register_builtin_tools()
     
-    def _register_builtin_tools(self):
-        self.register_tool('get_current_time', 'Get current time', self._get_current_time, {'timezone': {'type': 'string', 'default': 'UTC'}})
-        self.register_tool('calculate', 'Perform calculations', self._calculate, {'expression': {'type': 'string', 'required': True}})
-        self.register_tool('search_memory', 'Search memory', self._search_memory, {'query': {'type': 'string', 'required': True}, 'limit': {'type': 'integer', 'default': 5}})
-        self.register_tool('save_note', 'Save a note', self._save_note, {'text': {'type': 'string', 'required': True}, 'tags': {'type': 'string', 'default': ''}})
-        self.register_tool('remember_fact', 'Remember a fact', self._remember_fact, {'key': {'type': 'string', 'required': True}, 'value': {'type': 'string', 'required': True}})
-        self.register_tool('get_fact', 'Get a fact', self._get_fact, {'key': {'type': 'string', 'required': True}})
-        self.register_tool('fetch_url', 'Fetch URL', self._fetch_url, {'url': {'type': 'string', 'required': True}})
-        self.register_tool('read_file', 'Read file', self._read_file, {'path': {'type': 'string', 'required': True}})
-        self.register_tool('write_file', 'Write file', self._write_file, {'path': {'type': 'string', 'required': True}, 'content': {'type': 'string', 'required': True}}, requires_approval=True)
-        self.register_tool('shell', 'Execute shell', self._shell, {'command': {'type': 'string', 'required': True}}, requires_approval=True)
+    def register(self, name: str, description: str, parameters: Dict[str, Any], 
+                 handler: Callable) -> None:
+        """
+        Register a new tool.
+        
+        Args:
+            name: Tool name
+            description: Tool description
+            parameters: JSON Schema for tool parameters
+            handler: Function to execute the tool
+        """
+        self.tools[name] = {
+            "handler": handler,
+            "schema": {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
+                },
+            },
+        }
     
-    def register_tool(self, name: str, description: str, handler: Callable, parameters: Dict = None, requires_approval: bool = False):
-        self.tools[name] = {'name': name, 'description': description, 'handler': handler, 'parameters': parameters or {}, 'requires_approval': requires_approval}
+    def schemas(self) -> List[Dict[str, Any]]:
+        """
+        Get OpenAI-compatible tool schemas for all registered tools.
+        
+        Returns:
+            List of tool schema dictionaries
+        """
+        return [tool["schema"] for tool in self.tools.values()]
     
-    def get_tool(self, name: str) -> Optional[Dict]:
-        return self.tools.get(name)
+    def names(self) -> List[str]:
+        """
+        Get list of all registered tool names.
+        
+        Returns:
+            List of tool names
+        """
+        return sorted(self.tools.keys())
     
-    def list_tools(self) -> List[Dict]:
-        return list(self.tools.values())
+    def exists(self, name: str) -> bool:
+        """
+        Check if a tool exists.
+        
+        Args:
+            name: Tool name to check
+            
+        Returns:
+            True if tool exists
+        """
+        return name in self.tools
     
-    def execute_tool(self, name: str, args: Dict) -> Any:
-        tool = self.get_tool(name)
-        if not tool:
-            return f"Tool {name} not found"
-        if tool.get('requires_approval', False):
-            return f"Tool {name} requires approval"
-        return tool['handler'](args)
-    
-    def _get_current_time(self, args):
-        timezone = args.get('timezone', 'UTC')
-        if timezone.upper() == 'UTC':
-            return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    def execute(self, name: str, args: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        Execute a tool by name.
+        
+        Args:
+            name: Tool name
+            args: Arguments to pass to the tool
+            
+        Returns:
+            Result of the tool execution
+        """
+        if name not in self.tools:
+            return f"Unknown tool: {name}"
+        
         try:
-            import pytz
-            tz = pytz.timezone(timezone)
-            return datetime.datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S %Z')
-        except:
-            return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    def _calculate(self, args):
-        expression = args.get('expression', '')
-        if not expression:
-            return "No expression"
-        try:
-            result = eval(expression, {'__builtins__': None}, {
-                'sin': math.sin, 'cos': math.cos, 'tan': math.tan,
-                'sqrt': math.sqrt, 'log': math.log, 'log10': math.log10,
-                'exp': math.exp, 'pi': math.pi, 'e': math.e,
-                'pow': math.pow, 'abs': abs, 'round': round,
-                'min': min, 'max': max, 'sum': sum
-            })
-            return str(result)
-        except Exception as e:
-            return f"Error: {str(e)}"
-    
-    def _search_memory(self, args):
-        query = args.get('query', '')
-        limit = args.get('limit', 5)
-        if not query:
-            return "No query"
-        results = vector_store.search(query, limit)
-        if not results:
-            return "No results"
-        return "\n".join([f"{i+1}. [{r['score']*100:.0f}%] {r['text'][:200]}" for i, r in enumerate(results)])
-    
-    def _save_note(self, args):
-        text = args.get('text', '')
-        tags = args.get('tags', '')
-        if not text:
-            return "No text"
-        note_id = db.add_note(text, tags)
-        vector_store.add(text, kind='note', metadata={'tags': tags})
-        return f"Note saved: {note_id}"
-    
-    def _remember_fact(self, args):
-        key = args.get('key', '')
-        value = args.get('value', '')
-        if not key or not value:
-            return "Key and value required"
-        db.add_fact(key, value)
-        vector_store.add(f"{key}: {value}", kind='fact', metadata={'key': key})
-        return f"Fact saved: {key} = {value}"
-    
-    def _get_fact(self, args):
-        key = args.get('key', '')
-        fact = db.get_fact(key)
-        return f"{fact['key']} = {fact['value']}" if fact else f"Fact {key} not found"
-    
-    def _fetch_url(self, args):
-        url = args.get('url', '')
-        if not url:
-            return "No URL"
-        try:
-            import requests
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return f"URL: {url}\n\n{response.text[:10000]}"
-        except Exception as e:
-            return f"Error: {str(e)}"
-    
-    def _read_file(self, args):
-        path = args.get('path', '')
-        if not path:
-            return "No path"
-        try:
-            if not os.path.exists(path):
-                return f"File not found: {path}"
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            if len(content) > 10000:
-                content = content[:10000] + "\n\n... (truncated)"
-            return f"File: {path}\n\n{content}"
-        except Exception as e:
-            return f"Error: {str(e)}"
-    
-    def _write_file(self, args):
-        path = args.get('path', '')
-        content = args.get('content', '')
-        if not path or not content:
-            return "Path and content required"
-        try:
-            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return f"File written: {path}"
-        except Exception as e:
-            return f"Error: {str(e)}"
-    
-    def _shell(self, args):
-        command = args.get('command', '')
-        if not command:
-            return "No command"
-        try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
-            output = result.stdout or result.stderr
-            if len(output) > 5000:
-                output = output[:5000] + "\n\n... (truncated)"
-            return f"Exit code: {result.returncode}\n\n{output}"
-        except Exception as e:
-            return f"Error: {str(e)}"
+            args = args or {}
+            return self.tools[name]["handler"](args)
+        except Exception as exc:
+            return f"Tool error in {name}: {exc}"
 
 
+# Global tool registry instance
 tools = ToolRegistry()
+
+
+# ============================================================
+# Register Built-in Tools
+# ============================================================
+
+def register_builtin_tools(db=None, vector_store=None, browser=None, voice=None):
+    """
+    Register all built-in tools.
+    
+    Args:
+        db: Database instance
+        vector_store: Vector store instance
+        browser: Browser manager instance
+        voice: Voice manager instance
+    """
+    # Time tool
+    tools.register(
+        name="get_current_time",
+        description="Get current local time",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+        handler=lambda args: datetime.datetime.now().isoformat(timespec="seconds")
+    )
+    
+    # Math tool
+    tools.register(
+        name="calculate",
+        description="Evaluate a math expression safely",
+        parameters={
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string"},
+            },
+            "required": ["expression"],
+        },
+        handler=lambda args: safe_math(args.get("expression", "0"))
+    )
+    
+    # Search memory tool
+    if vector_store:
+        tools.register(
+            name="search_memory",
+            description="Search long-term vector memory",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+            handler=lambda args: json.dumps(
+                vector_store.search(
+                    args.get("query", ""),
+                    int(args.get("limit", 5))
+                ),
+                indent=2
+            )
+        )
+    
+    # Save note tool
+    if db:
+        tools.register(
+            name="save_note",
+            description="Save a note into memory",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "tags": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+            handler=lambda args: (
+                db.add_note(args.get("text", ""), args.get("tags", "")),
+                "Note saved."
+            )[1]
+        )
+    
+    # Remember fact tool
+    if db:
+        tools.register(
+            name="remember_fact",
+            description="Store a user fact",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["key", "value"],
+            },
+            handler=lambda args: (
+                db.set_fact(args.get("key", ""), args.get("value", "")),
+                f"Remembered fact: {args.get('key', '')}"
+            )[1]
+        )
+    
+    # Fetch URL tool
+    tools.register(
+        name="fetch_url",
+        description="Fetch a URL and extract text",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "max_chars": {"type": "integer"},
+            },
+            "required": ["url"],
+        },
+        handler=lambda args: {
+            "text": "URL fetching not implemented in tools (use /browser open instead)",
+            "url": args.get("url", "")
+        }
+    )
+    
+    # Browser tools
+    if browser and browser.installed:
+        tools.register(
+            name="browser_navigate",
+            description="Open a URL in a headless browser",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                },
+                "required": ["url"],
+            },
+            handler=lambda args: browser.navigate(args.get("url", ""))
+        )
+        
+        tools.register(
+            name="browser_fill",
+            description="Fill a form field using CSS selector",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["selector", "text"],
+            },
+            handler=lambda args: browser.fill(
+                args.get("selector", ""),
+                args.get("text", "")
+            )
+        )
+        
+        tools.register(
+            name="browser_click",
+            description="Click an element using CSS selector",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string"},
+                },
+                "required": ["selector"],
+            },
+            handler=lambda args: browser.click(args.get("selector", ""))
+        )
+        
+        tools.register(
+            name="browser_text",
+            description="Extract text from browser page",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string"},
+                },
+            },
+            handler=lambda args: browser.get_text(args.get("selector", "body"))
+        )
+        
+        tools.register(
+            name="browser_screenshot",
+            description="Take a screenshot of the current page",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+            },
+            handler=lambda args: browser.take_screenshot(args.get("path", "screenshot.png"))
+        )
+    
+    # Voice tools
+    if voice:
+        tools.register(
+            name="speak",
+            description="Speak text aloud",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+            handler=lambda args: voice.speak(args.get("text", ""))
+        )
+        
+        tools.register(
+            name="listen",
+            description="Listen to microphone input",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "timeout": {"type": "number"},
+                    "phrase_time_limit": {"type": "number"},
+                },
+            },
+            handler=lambda args: voice.listen(
+                timeout=float(args.get("timeout", 5.0)),
+                phrase_time_limit=float(args.get("phrase_time_limit", 15.0))
+            )
+        )
