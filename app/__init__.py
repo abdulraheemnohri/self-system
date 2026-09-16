@@ -1,5 +1,5 @@
 """
-Complete Self System - خود کار نظام
+Complete Self System
 
 An autonomous AI agent platform with:
 - LLM integration
@@ -14,6 +14,6 @@ Author: Abdulraheem Nohari
 License: MIT
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Abdulraheem Nohari"
 __description__ = "Complete Self System - Autonomous AI Agent Platform"
