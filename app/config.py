@@ -1,6 +1,7 @@
 """
 Configuration Manager for Complete Self System
-کنفیگریشن مینیجر برائے خود کار نظام
+
+Centralized configuration management with YAML and environment variable support
 """
 
 import os
@@ -93,7 +94,7 @@ class Config:
     
     def get_default_config(self) -> Dict[str, Any]:
         return {
-            'system': {'name': 'Complete Self System', 'version': '1.0', 'mode': 'development'},
+            'system': {'name': 'Complete Self System', 'version': '2.0', 'mode': 'development'},
             'provider': {'base_url': 'http://localhost:11434/v1', 'api_key': '', 'model': 'llama3.1', 'embedding_model': 'nomic-embed-text', 'use_api_embeddings': True},
             'agent': {'agent_mode': True, 'enable_tool_calls': True, 'max_agent_steps': 10, 'context_turns': 16},
             'memory': {'vector_backend': 'sqlite', 'qdrant_url': 'http://localhost:6333', 'qdrant_collection': 'self_system'},
