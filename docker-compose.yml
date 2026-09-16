@@ -1,142 +1,39 @@
-# Complete Self System Docker Compose
-# ======================================
-# Run with: docker-compose up -d
-
-version: "3.9"
+version: '3.8'
 
 services:
-  # =====================================
-  # Main Application
-  # =====================================
-  app:
+  allostatic-self:
     build:
       context: .
-      target: runtime
-    container_name: self-system-app
+      dockerfile: Dockerfile
+    container_name: allostatic-self
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - AI_API_KEY=${AI_API_KEY:-}
-      - AI_BASE_URL=${AI_BASE_URL:-http://ollama:11434/v1}
-      - AI_MODEL=${AI_MODEL:-llama3.1}
-      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-nomic-embed-text}
-      - AUTONOMOUS_MODE=${AUTONOMOUS_MODE:-false}
     volumes:
       - ./storage:/app/storage
-      - ./plugins:/app/plugins
-      - ./generated_skills:/app/generated_skills
-      - ./tests:/app/tests
       - ./logs:/app/logs
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
-    depends_on:
-      - ollama
-      - qdrant
-    networks:
-      - self-system-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sqlite3; conn = sqlite3.connect('storage/self_system.db'); conn.close()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
-  # =====================================
-  # Ollama - Local LLM Server
-  # =====================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   ollama:
     image: ollama/ollama:latest
-    container_name: self-system-ollama
+    container_name: ollama
     restart: unless-stopped
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - self-system-network
-    # GPU support (uncomment if you have NVIDIA GPU)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-
-  # =====================================
-  # Qdrant - Vector Database
-  # =====================================
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: self-system-qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"  # HTTP API
-      - "6334:6334"  # gRPC
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - self-system-network
-    environment:
-      - QDRANT__LOG_LEVEL=INFO
-
-  # =====================================
-  # ChromaDB - Alternative Vector Database
-  # =====================================
-  # Uncomment to use ChromaDB instead of Qdrant
-  # chroma:
-  #   image: chromadb/chroma:latest
-  #   container_name: self-system-chroma
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8001:8000"
-  #   volumes:
-  #     - chroma_data:/chroma/chroma
-  #   networks:
-  #     - self-system-network
-
-  # =====================================
-  # PostgreSQL - For production storage
-  # =====================================
-  # Uncomment to use PostgreSQL instead of SQLite
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: self-system-postgres
-  #   restart: unless-stopped
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   networks:
-  #     - self-system-network
-  #   environment:
-  #     - POSTGRES_USER=self_system
-  #     - POSTGRES_PASSWORD=change_me
-  #     - POSTGRES_DB=self_system
-
-  # =====================================
-  # Redis - For caching
-  # =====================================
-  # Uncomment to add Redis for caching
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: self-system-redis
-  #   restart: unless-stopped
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   networks:
-  #     - self-system-network
+      - ollama-data:/root/.ollama
 
 volumes:
-  ollama_data:
-  qdrant_data:
-  # chroma_data:
-  # postgres_data:
-  # redis_data:
-
-networks:
-  self-system-network:
-    driver: bridge
+  qdrant-data:
+  ollama-data:
