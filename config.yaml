@@ -1,4 +1,6 @@
 # Complete Self System Configuration
+# =====================================
+# Version: 1.1.0 - Enhanced with Self-Growing Features
 # This file contains all settings for the AI agent
 
 # ============================================================
@@ -6,10 +8,19 @@
 # ============================================================
 system:
   name: "Complete Self System"
-  version: "1.0.0"
+  version: "1.1.0"
   mode: "development"  # development, production, debug
   debug: false
   
+  # Self-improvement settings
+  self_improvement:
+    enabled: true
+    auto_learn: true
+    auto_optimize: true
+    auto_document: true
+    auto_test: true
+    max_modifications_per_session: 3
+
 # ============================================================
 # LLM Provider Settings
 # ============================================================
@@ -46,6 +57,15 @@ provider:
   
   # Temperature (0.0 to 1.0)
   temperature: 0.2
+  
+  # Top P for nucleus sampling (0.0 to 1.0)
+  top_p: 0.9
+  
+  # Frequency penalty (-2.0 to 2.0)
+  frequency_penalty: 0.0
+  
+  # Presence penalty (-2.0 to 2.0)
+  presence_penalty: 0.0
 
 # ============================================================
 # Agent Settings
@@ -65,6 +85,12 @@ agent:
   
   # Maximum context characters
   max_context_chars: 9000
+  
+  # Enable streaming responses
+  streaming: false
+  
+  # Verbose tool output
+  verbose_tools: false
 
 # ============================================================
 # Memory Settings
@@ -99,6 +125,15 @@ memory:
   
   # Knowledge threshold (for direct knowledge answers)
   knowledge_threshold: 0.82
+  
+  # Maximum number of memories to keep
+  max_memories: 10000
+  
+  # Memory cleanup interval (days)
+  memory_cleanup_days: 30
+  
+  # Enable automatic memory optimization
+  auto_optimize_memory: true
 
 # ============================================================
 # Safety Settings
@@ -116,6 +151,12 @@ safety:
   # Allow skill generation tool
   allow_skill_tool: false
   
+  # Allow code execution tool
+  allow_code_tool: false
+  
+  # Allow file operations tool
+  allow_file_tool: false
+  
   # Enable voice output
   speak_responses: false
   
@@ -127,13 +168,31 @@ safety:
     - generate_skill
     - install_skill
     - file_write
+    - file_delete
     - shell
     - execute_code
+    - modify_self
+    - add_feature
   
   # Disabled tools (completely blocked)
   disabled:
     - shell
     - execute_code
+  
+  # Rate limits (calls per hour)
+  rate_limits:
+    fetch_url: 60
+    browser_navigate: 30
+    browser_fill: 20
+    browser_click: 20
+    generate_skill: 5
+    run_plugin: 20
+    search_memory: 100
+    calculate: 1000
+    file_read: 60
+    file_write: 10
+    file_delete: 5
+    execute_code: 10
 
 # ============================================================
 # Voice Settings
@@ -156,6 +215,15 @@ voice:
   
   # Volume (0.0 to 1.0)
   volume: 0.9
+  
+  # Enable continuous listening
+  continuous_listening: false
+  
+  # Listening timeout (seconds)
+  listening_timeout: 5.0
+  
+  # Phrase time limit (seconds)
+  phrase_time_limit: 15.0
 
 # ============================================================
 # Browser Settings
@@ -172,6 +240,23 @@ browser:
   
   # Default wait condition
   wait_until: "domcontentloaded"
+  
+  # Viewport size
+  viewport:
+    width: 1280
+    height: 720
+  
+  # User agent
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  
+  # Enable screenshots
+  enable_screenshots: true
+  
+  # Enable PDF generation
+  enable_pdf: true
+  
+  # Maximum page load time (milliseconds)
+  page_timeout_ms: 30000
 
 # ============================================================
 # Scheduler Settings
@@ -183,32 +268,52 @@ scheduler:
   # Database path for scheduler
   db_path: "storage/scheduler.db"
   
+  # Check interval (seconds)
+  check_interval: 10
+  
   # Default tasks (can be overridden)
   default_tasks:
     - name: "memory_cleanup"
       action: "memory_cleanup"
-      interval_seconds: 3600  # 1 hour
+      interval_seconds: 3600
       description: "Clean up old history and duplicate memories"
+      enabled: true
       
     - name: "self_review"
       action: "self_review"
-      interval_seconds: 14400  # 4 hours
+      interval_seconds: 14400
       description: "Review recent conversations and suggest improvements"
+      enabled: true
       
     - name: "periodic_learning"
       action: "periodic_learning"
-      interval_seconds: 43200  # 12 hours
+      interval_seconds: 43200
       description: "Summarize recent notes into long-term memory"
+      enabled: true
       
     - name: "skill_proposal"
       action: "skill_proposal"
-      interval_seconds: 86400  # 24 hours
+      interval_seconds: 86400
       description: "Propose new skills based on recent usage"
+      enabled: true
       
     - name: "health_check"
       action: "health_check"
-      interval_seconds: 21600  # 6 hours
+      interval_seconds: 21600
       description: "Check system health and dependencies"
+      enabled: true
+      
+    - name: "self_improvement_check"
+      action: "self_improvement_check"
+      interval_seconds: 43200
+      description: "Check for self-improvement opportunities"
+      enabled: true
+      
+    - name: "knowledge_expansion"
+      action: "knowledge_expansion"
+      interval_seconds: 86400
+      description: "Expand knowledge based on recent conversations"
+      enabled: true
 
 # ============================================================
 # Storage Settings
@@ -237,6 +342,15 @@ storage:
   
   # Tests directory
   tests_dir: "tests"
+  
+  # Temporary files directory
+  temp_dir: "temp"
+  
+  # Maximum storage size (bytes)
+  max_size: 1073741824
+  
+  # Enable storage cleanup
+  auto_cleanup: true
 
 # ============================================================
 # Plugin Settings
@@ -247,6 +361,103 @@ plugins:
   
   # Allow dynamic plugin loading
   allow_dynamic: true
+  
+  # Allowed plugin directories
+  allowed_dirs:
+    - "plugins"
+    - "generated_skills"
+  
+  # Maximum plugin size (bytes)
+  max_plugin_size: 1048576
+
+# ============================================================
+# File Operations Settings
+# ============================================================
+file_operations:
+  # Enable file tools
+  enabled: false
+  
+  # Allowed directories for file operations
+  allowed_dirs:
+    - "storage"
+    - "plugins"
+    - "generated_skills"
+    - "tests"
+    - "temp"
+  
+  # Blocked file extensions
+  blocked_extensions:
+    - ".py"
+    - ".sh"
+    - ".bat"
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".com"
+    - ".msi"
+    - ".app"
+    - ".js"
+    - ".html"
+    - ".php"
+  
+  # Allowed write extensions
+  allowed_write_extensions:
+    - ".txt"
+    - ".md"
+    - ".json"
+    - ".yaml"
+    - ".yml"
+    - ".csv"
+    - ".log"
+    - ".data"
+    - ".config"
+  
+  # Maximum file size for read operations (bytes)
+  max_read_size: 1048576
+  
+  # Maximum file size for write operations (bytes)
+  max_write_size: 1048576
+
+# ============================================================
+# Code Execution Settings
+# ============================================================
+code_execution:
+  # Enable code execution tool
+  enabled: false
+  
+  # Maximum execution time (seconds)
+  timeout: 5
+  
+  # Maximum AST complexity allowed
+  max_complexity: 100
+  
+  # Allowed modules
+  allowed_modules:
+    - "math"
+    - "json"
+    - "time"
+    - "datetime"
+    - "uuid"
+    - "hashlib"
+    - "collections"
+    - "itertools"
+    - "functools"
+    - "operator"
+  
+  # Blocked modules
+  blocked_modules:
+    - "os"
+    - "subprocess"
+    - "sys"
+    - "importlib"
+    - "builtins"
+    - "socket"
+    - "shutil"
+    - "pickle"
+    - "marshal"
+    - "ctypes"
+    - "multiprocessing"
+    - "threading"
 
 # ============================================================
 # Logging Settings
@@ -256,13 +467,22 @@ logging:
   level: "INFO"
   
   # Log file path
-  file: "logs/self_system.log"
+  file: "storage/self_system.log"
   
   # Max log file size (bytes)
-  max_size: 10485760  # 10MB
+  max_size: 10485760
   
   # Number of log files to keep
   backup_count: 5
+  
+  # Enable console logging
+  console: true
+  
+  # Log format
+  format: "[%(asctime)s] %(levelname)s: %(message)s"
+  
+  # Date format
+  date_format: "%Y-%m-%d %H:%M:%S"
 
 # ============================================================
 # API Settings
@@ -287,6 +507,12 @@ api:
   cors_origins:
     - "http://localhost:3000"
     - "http://localhost:8080"
+  
+  # Enable authentication
+  auth_enabled: false
+  
+  # API key for authentication (if enabled)
+  api_key: ""
 
 # ============================================================
 # Web Dashboard Settings
@@ -303,6 +529,12 @@ dashboard:
   
   # Dashboard title
   title: "Complete Self System"
+  
+  # Enable authentication
+  auth_enabled: false
+  
+  # Dashboard theme
+  theme: "dark"
 
 # ============================================================
 # System Prompt
@@ -319,22 +551,68 @@ prompt:
     - Be concise, practical, and safe
     - If you do not know something, say so
     - Follow user instructions carefully
+    - Learn from conversations and improve over time
     
     Safety:
     - Never execute dangerous code
     - Never modify files without permission
     - Never expose sensitive information
     - Always ask for clarification if unsure
+    - Respect user privacy
     
     Memory:
     - Store important information in notes
     - Remember facts about the user
     - Learn from conversations
+    - Use vector memory for semantic search
     
     Tools:
     - Use tools to accomplish tasks
     - Only use tools when necessary
     - Report tool results to the user
+    - Handle errors gracefully
+    
+    Self-Improvement:
+    - Suggest improvements when appropriate
+    - Learn from mistakes
+    - Optimize performance
+    - Expand knowledge base
     
   # Conversation starter (for new chats)
   starter: "How can I help you today?"
+  
+  # Agent mode prompt
+  agent: |
+    You are in agent mode. You can call tools to accomplish tasks.
+    
+    Guidelines:
+    - Plan your actions before executing
+    - Use tools only when necessary
+    - Check tool results carefully
+    - Report progress to the user
+    - Ask for clarification if needed
+    
+    Available tools (if enabled):
+    - calculate: Evaluate math expressions
+    - get_current_time: Get current time
+    - search_memory: Search vector memory
+    - save_note: Save a note
+    - remember_fact: Store a fact
+    - browser_navigate: Open URL in browser
+    - browser_text: Extract text from page
+    - browser_fill: Fill form field
+    - browser_click: Click element
+    - browser_screenshot: Take screenshot
+    - browser_pdf: Generate PDF
+    - speak: Speak text aloud
+    - listen: Listen to microphone
+    - file_read: Read a file
+    - file_write: Write to a file
+    - file_delete: Delete a file
+    - file_list: List directory contents
+    - file_info: Get file information
+    - execute_code: Execute Python code (sandboxed)
+    - system_info: Get system information
+    - system_monitor: Monitor system resources
+    
+    When the task is complete, provide a final answer to the user.
