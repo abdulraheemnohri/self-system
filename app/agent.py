@@ -1,6 +1,5 @@
 """
 Agent Core for Complete Self System
-ایجنٹ کور برائے خود کار نظام
 
 Implements the agent loop: perceive, retrieve, plan, act, observe, learn
 """

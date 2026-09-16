@@ -1,6 +1,7 @@
 """
 Complete Self System - Main Entry Point
-خود کار نظام - مرکزی اندراج نقطہ
+
+Autonomous AI agent platform with tools, plugins, and skills
 """
 
 import os
@@ -73,7 +74,6 @@ class Scheduler:
         try:
             if action == 'maintenance':
                 db.cleanup_history(days=30)
-                db.cleanup_memories(max_memories=10000)
             elif action == 'self_review':
                 history = db.get_history(30)
                 if history:
@@ -220,7 +220,7 @@ def handle_command(command: str):
 def main():
     print("=" * 60)
     print("COMPLETE SELF SYSTEM")
-    print("خود کار نظام")
+    print("Autonomous AI Agent Platform")
     print("=" * 60)
     print("Type /help for commands.")
     print()

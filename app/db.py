@@ -1,6 +1,5 @@
 """
 Database Manager for Complete Self System
-ڈاٹا بیس مینیجر برائے خود کار نظام
 
 SQLite backend for facts, notes, knowledge, history, and vector memory
 """

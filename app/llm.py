@@ -1,6 +1,7 @@
 """
 LLM Client for Complete Self System
-EL EM مینیجر برائے خود کار نظام
+
+Handles all LLM interactions including chat and embeddings
 """
 
 import time

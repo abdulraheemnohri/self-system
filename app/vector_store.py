@@ -1,6 +1,7 @@
 """
 Vector Store for Complete Self System
-ویکٹر اسٹور برائے خود کار نظام
+
+Manages vector embeddings for memory and semantic search
 """
 
 import uuid
@@ -102,85 +103,66 @@ class VectorStore:
         elif self.backend == 'qdrant':
             try:
                 from qdrant_client.http import models
-                result = self.client.search(collection_name=self.collection_name, query_vector=qvec, limit=limit, with_payload=True)
-                for record in result:
-                    payload = record.payload
-                    if kind and payload.get('kind') != kind:
+                result = self.client.search(collection_name=self.collection_name, query_vector=qvec, limit=limit)
+                for item in result:
+                    score = item.score
+                    if kind and item.payload.get('kind') != kind:
                         continue
-                    results.append({'id': str(record.id), 'text': payload.get('text', ''), 'score': float(record.score), 'metadata': {k: v for k, v in payload.items() if k != 'text'}})
+                    results.append({'id': item.id, 'text': item.payload.get('text', ''), 'score': score, 'metadata': item.payload})
             except:
                 results = []
-        if not results or self.backend == 'sqlite':
-            sqlite_results = self._sqlite_search(query, limit, kind, qvec)
-            existing_ids = {r['id'] for r in results}
-            for r in sqlite_results:
-                if r['id'] not in existing_ids:
-                    results.append(r)
-            results.sort(key=lambda x: x['score'], reverse=True)
-            results = results[:limit]
-        return results
+        if not results:
+            memories = db.get_memories_by_dim(self.dimension, limit * 10)
+            for mem in memories:
+                if kind and mem.get('kind') != kind:
+                    continue
+                try:
+                    emb = json.loads(mem['embedding'])
+                    if len(emb) != len(qvec):
+                        continue
+                    score = self._cosine_similarity(emb, qvec)
+                    results.append({'id': mem['id'], 'text': mem['text'], 'score': score, 'metadata': json.loads(mem['metadata']) if mem['metadata'] else {}})
+                except:
+                    continue
+                if len(results) >= limit:
+                    break
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
     
-    def _sqlite_search(self, query, limit, kind, qvec):
-        rows = db.get_memories_by_dim(len(qvec))
-        scored = []
-        for row in rows:
-            try:
-                vec = json.loads(row.get('embedding', '[]'))
-            except:
-                continue
-            if kind and row.get('kind') != kind:
-                continue
-            score = cosine_similarity(qvec, vec)
-            if score >= 0.08:
-                metadata = json.loads(row.get('metadata', '{}'))
-                scored.append({'id': row.get('id'), 'text': row.get('text', ''), 'score': score, 'metadata': metadata})
-        scored.sort(key=lambda x: x['score'], reverse=True)
-        return scored[:limit]
+    def _cosine_similarity(self, a: List[float], b: List[float]) -> float:
+        try:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            return max(0.0, min(1.0, dot / (norm_a * norm_b)))
+        except:
+            return 0.0
     
     def delete(self, memory_id: str) -> bool:
-        deleted = False
-        cursor = db._execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        deleted = cursor.rowcount > 0
-        if self.backend == 'chroma' and self.collection:
-            try:
+        try:
+            if self.backend == 'chroma' and self.collection:
                 self.collection.delete(ids=[memory_id])
-            except:
-                pass
-        elif self.backend == 'qdrant':
-            try:
-                from qdrant_client.http import models
-                self.client.delete(collection_name=self.collection_name, points_selector=models.PointIdsList(points=[memory_id]))
-            except:
-                pass
-        return deleted
+            elif self.backend == 'qdrant':
+                self.client.delete(collection_name=self.collection_name, points=[memory_id])
+            return True
+        except:
+            return False
     
     def get_stats(self) -> Dict[str, Any]:
-        stats = {'backend': self.backend, 'dimension': self.dimension, 'sqlite_count': 0}
-        rows = db._query("SELECT COUNT(*) as count FROM memories")
-        stats['sqlite_count'] = rows[0]['count'] if rows else 0
+        stats = {'backend': self.backend, 'dimension': self.dimension}
         if self.backend == 'chroma' and self.collection:
-            try:
-                stats['chroma_count'] = self.collection.count()
-            except:
-                stats['chroma_count'] = 0
+            stats['count'] = self.collection.count()
         elif self.backend == 'qdrant':
             try:
-                result = self.client.get_collection(self.collection_name)
-                stats['qdrant_count'] = result.vectors_count
+                info = self.client.get_collection(self.collection_name)
+                stats['count'] = info.vectors_count
             except:
-                stats['qdrant_count'] = 0
+                stats['count'] = 0
+        else:
+            stats['count'] = 0
         return stats
-
-
-def cosine_similarity(a, b):
-    if len(a) != len(b) or not a:
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 vector_store = VectorStore()
